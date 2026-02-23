@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ARCADE TETRIS</title>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: 'Press Start 2P', cursive;
+  background: url("arcade_bg.png") center/cover no-repeat;
+  overflow: hidden;
+}
+
+/* Dark overlay so board is visible */
+body::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(3px);
+}
+
+.wrapper {
+  position: relative;
+  display: flex;
+  gap: 40px;
+  z-index: 2;
+}
+
+canvas {
+  background: #0a0a0a;
+  border: 4px solid #00f0ff;
+  box-shadow: 0 0 30px #00f0ff;
+}
+
+.panel {
+  background: rgba(20,20,20,0.9);
+  padding: 20px;
+  border: 3px solid #ff00ff;
+  box-shadow: 0 0 20px #ff00ff;
+  width: 260px;
+  color: white;
+}
+
+.title {
+  text-align: center;
+  color: #00f0ff;
+  text-shadow: 0 0 10px #00f0ff;
+  margin-bottom: 20px;
+}
+
+.comboText {
+  position: absolute;
+  top: 200px;
+  left: 50%;
+  transform: translateX(-50%) scale(0);
+  font-size: 40px;
+  color: #ff00ff;
+  text-shadow: 0 0 20px #ff00ff;
+  pointer-events: none;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  opacity: 0;
+}
+</style>
+</head>
+<body>
+
+<div class="comboText" id="comboText"></div>
+
+<div class="wrapper">
+  <canvas id="game" width="300" height="600"></canvas>
+
+  <div class="panel">
+    <div class="title">ARCADE TETRIS</div>
+    <div>SCORE</div>
+    <div id="score">0000</div>
+    <br>
+    <div style="font-size:10px;">
+      ◀ ▶ MOVE<br>
+      ▲ ROTATE<br>
+      ▼ SOFT DROP<br>
+      SPACE HARD DROP
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("score");
+const comboEl = document.getElementById("comboText");
+
+const COLS = 10;
+const ROWS = 20;
+const SIZE = 30;
+
+let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+let score = 0;
+let dropInterval = 700;
+let dropCounter = 0;
+let lastTime = 0;
+
+const colors = [
+  null,
+  "#00f0ff","#ff00ff","#00ff88",
+  "#ff8800","#ffff00","#0088ff","#ff0044"
+];
+
+const shapes = [
+  [[1,1,1,1]],
+  [[1,1],[1,1]],
+  [[0,1,0],[1,1,1]],
+  [[1,0,0],[1,1,1]],
+  [[0,0,1],[1,1,1]],
+  [[0,1,1],[1,1,0]],
+  [[1,1,0],[0,1,1]]
+];
+
+function newPiece(){
+  const t = Math.floor(Math.random()*shapes.length);
+  return {x:3,y:0,matrix:shapes[t],color:t+1};
+}
+
+let player = newPiece();
+
+const keys = {};
+document.addEventListener("keydown", e=>{
+  if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key))
+    e.preventDefault();
+  keys[e.key]=true;
+});
+document.addEventListener("keyup", e=>keys[e.key]=false);
+
+function drawBlock(x,y,color){
+  ctx.fillStyle=color;
+  ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
+  ctx.strokeStyle="#111";
+  ctx.strokeRect(x*SIZE,y*SIZE,SIZE,SIZE);
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  for(let y=0;y<ROWS;y++)
+    for(let x=0;x<COLS;x++)
+      if(board[y][x])
+        drawBlock(x,y,colors[board[y][x]]);
+
+  player.matrix.forEach((row,y)=>{
+    row.forEach((val,x)=>{
+      if(val)
+        drawBlock(x+player.x,y+player.y,colors[player.color]);
+    });
+  });
+}
+
+function collide(){
+  for(let y=0;y<player.matrix.length;y++)
+    for(let x=0;x<player.matrix[y].length;x++)
+      if(player.matrix[y][x]){
+        let nx=player.x+x;
+        let ny=player.y+y;
+        if(nx<0||nx>=COLS||ny>=ROWS||(board[ny]&&board[ny][nx]))
+          return true;
+      }
+  return false;
+}
+
+function merge(){
+  player.matrix.forEach((row,y)=>{
+    row.forEach((val,x)=>{
+      if(val)
+        board[y+player.y][x+player.x]=player.color;
+    });
+  });
+}
+
+function rotate(m){
+  return m[0].map((_,i)=>m.map(r=>r[i]).reverse());
+}
+
+function showCombo(lines){
+  if(lines===4){
+    comboEl.textContent="TETRIS!";
+  } else if(lines>1){
+    comboEl.textContent=lines+" COMBO!";
+  } else {
+    return;
+  }
+
+  comboEl.style.opacity=1;
+  comboEl.style.transform="translateX(-50%) scale(1)";
+
+  setTimeout(()=>{
+    comboEl.style.opacity=0;
+    comboEl.style.transform="translateX(-50%) scale(0)";
+  },700);
+}
+
+function clearLines(){
+  let lines=0;
+
+  for(let y=ROWS-1;y>=0;y--){
+    if(board[y].every(c=>c!==0)){
+      board.splice(y,1);
+      board.unshift(Array(COLS).fill(0));
+      lines++;
+      y++;
+    }
+  }
+
+  if(lines>0){
+    score+=lines*100;
+    scoreEl.textContent=score.toString().padStart(4,"0");
+    dropInterval=Math.max(100,dropInterval-20);
+    showCombo(lines);
+  }
+}
+
+function hardDrop(){
+  while(!collide()) player.y++;
+  player.y--;
+  merge();
+  clearLines();
+  player=newPiece();
+}
+
+function update(time=0){
+  const delta=time-lastTime;
+  lastTime=time;
+  dropCounter+=delta;
+
+  if(keys["ArrowLeft"]){player.x--;if(collide())player.x++;keys["ArrowLeft"]=false;}
+  if(keys["ArrowRight"]){player.x++;if(collide())player.x--;keys["ArrowRight"]=false;}
+  if(keys["ArrowDown"]){player.y++;if(collide())player.y--;}
+  if(keys["ArrowUp"]){
+    const old=player.matrix;
+    player.matrix=rotate(player.matrix);
+    if(collide())player.matrix=old;
+    keys["ArrowUp"]=false;
+  }
+  if(keys[" "]){hardDrop();keys[" "]=false;}
+
+  if(dropCounter>dropInterval){
+    player.y++;
+    if(collide()){
+      player.y--;
+      merge();
+      clearLines();
+      player=newPiece();
+      if(collide()){
+        board=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+        score=0;
+        dropInterval=700;
+        scoreEl.textContent="0000";
+      }
+    }
+    dropCounter=0;
+  }
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+update();
+</script>
+</body>
+</html>
+
